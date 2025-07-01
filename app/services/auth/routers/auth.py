@@ -30,8 +30,8 @@ async def user_register(data: UserAuthRegister, db: AsyncSession = Depends(get_d
     )
 
 
-@router.post("/refresh_token", response_model=UserAuthResponse)
-async def user_update_token(
+@router.post("/token/refresh", response_model=UserAuthResponse)
+async def refresh_token(
     data: UserUpdateRefresh, db: AsyncSession = Depends(get_db)
 ):
     access_token, refresh_token = await refresh_tokens(data.refresh_token, db)
