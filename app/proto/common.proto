@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+package common;
+
+message User {
+    int32 id = 1;
+    string name = 2;
+    string username = 3;
+    int32 age = 4;
+    string email = 5;
+}
