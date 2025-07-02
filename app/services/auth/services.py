@@ -17,30 +17,36 @@ import logging
 setup_log("auth")
 logger = logging.getLogger(__name__)
 
+
 def setup_tokens(email: str, user: User) -> tuple[str, str]:
     access = generate_access_token(email)
     refresh = generate_refresh_token(email)
     user.refresh_token = refresh
     return access, refresh
 
+
 async def login_user(data: UserAuthLogin, db: AsyncSession) -> tuple[str, str]:
     logger.info(f"Trying to log in user: {data.model_dump()}")
     result = await db.execute(select(User).filter_by(email=data.email))
     user = result.scalar_one_or_none()
 
-    if not user or not verify_password(data.password, str(user.password_hash)):
+    if not user:
         logger.warning(f"Unknown user: {data.model_dump()}")
-        raise HTTPException(status_code=401, detail="Email or password is wrong")
+        raise HTTPException(status_code=401, detail="User does not exist")
 
-    try: 
+    if not verify_password(data.password, str(user.password_hash)):
+        logger.warning(f"Wrong password: {data.model_dump()}")
+        raise HTTPException(status_code=401, detail="Wrong password")
+
+    try:
         access, refresh = setup_tokens(data.email, user)
         await db.commit()
     except Exception as e:
         await db.rollback()
         logger.error(f"Error during login database update: {e}")
         raise HTTPException(status_code=500, detail="Error while logging user in")
-    return access, refresh 
-    
+    return access, refresh
+
 
 async def register_user(data: UserAuthRegister, db: AsyncSession) -> tuple[str, str]:
     logger.info(f"Trying to register user: {data.model_dump()}")
@@ -74,13 +80,15 @@ async def register_user(data: UserAuthRegister, db: AsyncSession) -> tuple[str, 
         await db.flush()
         access, refresh = setup_tokens(data.email, new_user)
         await db.commit()
-        logger.info(f"Successfully registered new user: {new_user.email} (id={new_user.id})")
+        logger.info(
+            f"Successfully registered new user: {new_user.email} (id={new_user.id})"
+        )
     except Exception as e:
         await db.rollback()
         logger.error(f"Error while registering new user: {e}")
         raise HTTPException(status_code=500, detail="Error while creating new user")
-    return access, refresh 
-        
+    return access, refresh
+
 
 async def refresh_tokens(refresh_token: str, db: AsyncSession) -> tuple[str, str]:
     logger.info(f"Updating token: {refresh_token}")
@@ -88,25 +96,31 @@ async def refresh_tokens(refresh_token: str, db: AsyncSession) -> tuple[str, str
         payload = decode_token(refresh_token)
         user_email = payload["sub"]
     except Exception:
-        logger.error(f"Error while updating token - token is not correct: {refresh_token}")
-        raise HTTPException(
-            status_code=401, detail="Provided token is not correct"
+        logger.error(
+            f"Error while updating token - token is not correct: {refresh_token}"
         )
+        raise HTTPException(status_code=401, detail="Provided token is not correct")
     result = await db.execute(select(User).filter_by(email=user_email))
     user = result.scalar_one_or_none()
 
     if not user:
-        logger.error(f"Error while updating token - user with that email does not exist: {refresh_token}")
+        logger.error(
+            f"Error while updating token - user with that email does not exist: {refresh_token}"
+        )
         raise HTTPException(
             status_code=401, detail="User with that email does not exist"
         )
 
     if not user.refresh_token:
-        logger.error(f"Error while updating token - token does not exist: {refresh_token}")
+        logger.error(
+            f"Error while updating token - token does not exist: {refresh_token}"
+        )
         raise HTTPException(status_code=401, detail="Refresh token does not exist")
 
     if refresh_token != user.refresh_token:
-        logger.error(f"Error while updating token - token is not the same as in database: {refresh_token}")
+        logger.error(
+            f"Error while updating token - token is not the same as in database: {refresh_token}"
+        )
         raise HTTPException(
             status_code=401, detail="Provided token is not the same as in database"
         )
@@ -119,4 +133,4 @@ async def refresh_tokens(refresh_token: str, db: AsyncSession) -> tuple[str, str
         await db.rollback()
         logger.error(f"Error while updating user tokens: {e}")
         raise HTTPException(status_code=500, detail="Error while updating user tokens")
-    return access, refresh 
+    return access, refresh

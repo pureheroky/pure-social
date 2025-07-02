@@ -8,11 +8,8 @@ from sqlalchemy import (
 )
 from datetime import datetime, timezone
 from typing import List, Optional
-from sqlalchemy.orm import relationship, DeclarativeBase, Mapped, mapped_column
-
-
-class Base(DeclarativeBase):
-    pass
+from sqlalchemy.orm import relationship, Mapped, mapped_column
+from .base import Base
 
 
 class User(Base):
@@ -35,6 +32,7 @@ class User(Base):
     custom_url: Mapped[str] = mapped_column(String(16))
     age: Mapped[int] = mapped_column(Integer)
     username: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    profile_pic: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
     password_hash: Mapped[str] = mapped_column(Text, unique=True)
     email: Mapped[str] = mapped_column(Text, unique=True, index=True)
     refresh_token: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
