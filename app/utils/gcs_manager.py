@@ -17,14 +17,19 @@ class GCSManager:
         return self._bucket_name
 
     def upload_file(
-        self, file, file_extension: str, user_id: int, bucket_name: str | None = None
+        self,
+        file,
+        file_extension: str,
+        user_id: int,
+        dir: str,
+        bucket_name: str | None = None,
     ) -> str:
         current_bucket_name = bucket_name or self._bucket_name
         bucket = self.client.bucket(current_bucket_name)
 
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
         blob_name = (
-            f"avatars/user_{user_id}_{timestamp}_{uuid.uuid4().hex}{file_extension}"
+            f"{dir}/{dir}_{user_id}_{timestamp}_{uuid.uuid4().hex}{file_extension}"
         )
         blob = bucket.blob(blob_name)
 
