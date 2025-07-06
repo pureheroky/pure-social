@@ -2,3 +2,8 @@
 **logs/
 __pycache__
 .env
+service-account.json
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
