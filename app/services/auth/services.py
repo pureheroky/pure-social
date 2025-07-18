@@ -12,10 +12,8 @@ from core.security import (
     verify_password,
 )
 from utils.logger import setup_log
-import logging
 
-setup_log("auth")
-logger = logging.getLogger(__name__)
+logger = setup_log("auth", __name__)
 
 
 def setup_tokens(email: str, user: User) -> tuple[str, str]:

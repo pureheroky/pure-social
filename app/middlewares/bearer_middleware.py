@@ -1,4 +1,4 @@
-from fastapi import HTTPException, Request
+from fastapi import Request
 from core.security import decode_token
 from starlette.middleware.base import BaseHTTPMiddleware
 from utils.logger import setup_log
@@ -6,15 +6,19 @@ import logging
 from fastapi.responses import JSONResponse
 import jwt
 
-setup_log("users")
-logger = logging.getLogger(__name__)
-
 
 class BearerCheckMiddleware(BaseHTTPMiddleware):
     def __init__(self, app):
         super().__init__(app)
+        self.logger = setup_log("middleware", __name__)
+        print(f"self.logger.name: {self.logger.name}")
+        print(f"self.logger.handlers: {self.logger.handlers}")
+        print(f"self.logger.propagate: {self.logger.propagate}")
 
     async def dispatch(self, request: Request, call_next):
+        self.logger.debug(
+            f"self.logger name: {self.logger.name}, handlers: {self.logger.handlers}"
+        )
         auth_header = request.headers.get("Authorization")
         if not auth_header or not auth_header.startswith("Bearer "):
             return JSONResponse(status_code=401, content={"detail": "Missing token"})
@@ -27,23 +31,24 @@ class BearerCheckMiddleware(BaseHTTPMiddleware):
                 return JSONResponse(
                     status_code=401, content={"detail": "Provided token is invalid"}
                 )
+            request.state.user_email = payload["sub"]
         except jwt.ExpiredSignatureError:
-            logger.error("Token has expired")
+            self.logger.error("Token has expired")
             return JSONResponse(
                 status_code=401, content={"detail": "Token has expired"}
             )
         except jwt.InvalidSignatureError:
-            logger.error("Invalid token signature")
+            self.logger.error("Invalid token signature")
             return JSONResponse(
                 status_code=401, content={"detail": "Invalid token signature"}
             )
         except Exception as e:
-            logger.error(f"Token decode error: {str(e)}")
+            self.logger.error(f"Token decode error: {str(e)}")
             return JSONResponse(
                 status_code=401, content={"detail": f"Bad token: {str(e)}"}
             )
 
         response = await call_next(request)
         client_host = request.client.host if request.client else "unknown"
-        logger.info(f"Request to: {request.url.path} from {client_host}")
+        self.logger.info(f"Request to: {request.url.path} from {client_host}")
         return response

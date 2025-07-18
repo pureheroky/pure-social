@@ -1,64 +1,55 @@
 from datetime import datetime, timezone
 from typing import List
-from fastapi import HTTPException, UploadFile, status
-from sqlalchemy.engine import result
+from fastapi import HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 from sqlalchemy.orm import selectinload
 from .schemas import UserData, FriendshipData
-from db.models.user import Friendship, User
-from utils.db_utils import check_user_exists
+from db.models.user import Friendship
+from utils.db_utils import get_user_by_id, get_user_by_email
 from utils.logger import setup_log
-import logging
 from core.config import get_settings
 from utils.gcs_manager import GCSManager
 from PIL import Image
 import io
 
 settings = get_settings()
-setup_log("auth")
-logger = logging.getLogger(__name__)
-
+logger = setup_log("users", __name__)
 gcs_client = GCSManager(settings.GCS_BUCKET_NAME)
 ALLOWED_EXTENSIONS = {".jpg", ".png", ".png", ".webp"}
 
 
-async def get_user_by_id(user_id: int, db: AsyncSession) -> UserData:
-    logger.info(f"Trying to get user with id: {user_id}")
-    result = await db.execute(select(User).filter_by(id=user_id))
-    user = result.scalar_one_or_none()
+async def get_user_with_email(email: str, db: AsyncSession) -> UserData:
+    logger.info(f"Trying to get user with email: {email}")
+    user = await get_user_by_email(email, db)
 
-    if not user:
-        logger.error(f"User with id {user_id} was not found")
+    if user is None:
+        logger.error(f"User with email {email} was not found")
         raise HTTPException(status_code=400, detail="User was not found")
 
     return UserData.model_validate(user)
 
 
-async def upload_avatar_pic(
-    user_id: int, file: UploadFile, db: AsyncSession
-) -> UserData:
-    logger.info(f"Trying to update profile picture of user with id: {user_id}")
+async def upload_avatar_pic(email: str, file: UploadFile, db: AsyncSession) -> UserData:
+    logger.info(f"Trying to update profile picture of user with email: {email}")
 
     if not file.filename:
-        logger.error(f"Unsupported file for user {user_id}")
+        logger.error(f"Unsupported file for user {email}")
         raise HTTPException(status_code=500, detail="Avatar was not properly provided")
 
     file_ext = f".{file.filename.split(".")[-1].lower()}"
     if file_ext not in ALLOWED_EXTENSIONS:
-        logger.error(f"Unsupported file format for user {user_id}: {file.filename}")
+        logger.error(f"Unsupported file format for user {email}: {file.filename}")
         raise HTTPException(status_code=500, detail="Unsupported file format")
 
     try:
         img = Image.open(io.BytesIO(await file.read()))
         img.verify()
         file.file.seek(0)
-        avatar_url = gcs_client.upload_file(file.file, file_ext, user_id, "avatars")
-        result = await db.execute(select(User).filter_by(id=user_id))
-        user = result.scalar_one_or_none()
+        user = await get_user_by_email(email, db)
 
-        if not user:
-            logger.error(f"User with id {user_id} was not found during avatar update")
+        if user is None:
+            logger.error(f"User with email {email} was not found during avatar update")
             raise HTTPException(status_code=500, detail="User was not found")
 
         if user.profile_pic:
@@ -67,27 +58,36 @@ async def upload_avatar_pic(
             )[-1].split("?")[0]
             gcs_client.delete_file(old_blob_name)
 
+        user_id = user.id
+        avatar_url = gcs_client.upload_file(file.file, file_ext, user_id, "avatars")
+
         user.profile_pic = avatar_url
         await db.commit()
 
-        logger.info(f"Successfully updated profile picture for user {user_id}")
+        logger.info(f"Successfully updated profile picture for user {email}")
         return UserData.model_validate(user)
 
     except Image.UnidentifiedImageError:
-        logger.error(f"Invalid image file for user: {user_id}")
+        logger.error(f"Invalid image file for user: {email}")
         raise HTTPException(status_code=400, detail="Invalid image file")
     except Exception as e:
-        logger.error(f"Error uploading profile picture for user {user_id}: {str(e)}")
+        logger.error(f"Error uploading profile picture for user {email}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error uploading file: {str(e)}")
 
 
 async def request_friend_status(
-    user_id: int, to_id: int, db: AsyncSession
+    email: str, to_id: int, db: AsyncSession
 ) -> FriendshipData:
-    logger.info(f"Trying to get friend request status from: {user_id} to: {to_id}")
+    logger.info(f"Trying to get friend request status from: {email} to: {to_id}")
+
+    user = await get_user_by_email(email, db)
+    if not user:
+        logger.error(f"Error user {email} not found")
+        raise HTTPException(status_code=404, detail="User not found")
+
     result = await db.execute(
         select(Friendship).filter(
-            Friendship.user_id == user_id, Friendship.friend_id == to_id
+            Friendship.user_id == user.id, Friendship.friend_id == to_id
         )
     )
     friendship = result.scalar_one_or_none()
@@ -97,17 +97,21 @@ async def request_friend_status(
     return FriendshipData.model_validate(friendship)
 
 
-async def request_friend(user_id: int, to_id: int, db: AsyncSession) -> FriendshipData:
-    logger.info(f"Trying to send friend request from: {user_id} to: {to_id}")
+async def request_friend(email: str, to_id: int, db: AsyncSession) -> FriendshipData:
+    logger.info(f"Trying to send friend request from: {email} to: {to_id}")
+    user = await get_user_by_email(email, db)
+    if user is None:
+        logger.error(f"Error user {email} not found")
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user_id = user.id
     if user_id == to_id:
-        logger.error(f"User tried to send request to himself: {user_id}")
+        logger.error(f"User tried to send request to himself: {email}")
         raise HTTPException(
             status_code=400, detail=f"You can not send request to yourself"
         )
 
-    if not await check_user_exists(user_id, db) or not await check_user_exists(
-        to_id, db
-    ):
+    if not await get_user_by_id(user_id, db) or not await get_user_by_id(to_id, db):
         logger.error(f"User with id {user_id} or {to_id} does not exist")
         raise HTTPException(
             status_code=404, detail=f"User with id {user_id} or {to_id} d not found"
@@ -161,9 +165,17 @@ async def request_friend(user_id: int, to_id: int, db: AsyncSession) -> Friendsh
 
 
 async def accept_or_decline_friend(
-    user_id: int, from_id: int, action: str, db: AsyncSession
+    email: str, from_id: int, action: str, db: AsyncSession
 ) -> FriendshipData:
-    logger.info(f"Trying to update friend request status from: {from_id} to: {user_id}")
+    logger.info(f"Trying to update friend request status from: {from_id} to: {email}")
+
+    user = await get_user_by_email(email, db)
+    if user is None:
+        logger.error(f"Error user {email} not found")
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user_id = user.id
+
     request_to_accept = await db.execute(
         select(Friendship).filter(
             Friendship.user_id == from_id,
@@ -212,11 +224,15 @@ async def accept_or_decline_friend(
 
 
 async def all_friends(
-    user_id: int, status_filter: str, direction: str, db: AsyncSession
+    email: str, status_filter: str, direction: str, db: AsyncSession
 ) -> List[UserData]:
-    logger.info(f"Trying to get friends of user with id: {user_id}")
-    if not await check_user_exists(user_id, db):
-        raise HTTPException(status_code=404, detail="User does not exists")
+    logger.info(f"Trying to get friends of user with email: {email}")
+    user = await get_user_by_email(email, db)
+    if user is None:
+        logger.error(f"Error user {email} not found")
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user_id = user.id
 
     if direction == "outgoing":
         query = (
@@ -234,7 +250,7 @@ async def all_friends(
                     Friendship.friend_id == user_id, Friendship.status == status_filter
                 )
             )
-            .options(selectinload(Friendship.friend))
+            .options(selectinload(Friendship.user))
         )
     else:
         logger.error(
@@ -253,12 +269,17 @@ async def all_friends(
     return [UserData.model_validate(user) for user in users]
 
 
-async def delete_friend(user_id: int, friend_id: int, db: AsyncSession) -> dict:
-    logger.info(f"Trying to delete friendship between {user_id} and {friend_id}")
+async def delete_friend(email: str, friend_id: int, db: AsyncSession) -> dict:
+    logger.info(f"Trying to delete friendship between {email} and {friend_id}")
 
-    if not await check_user_exists(user_id, db) or not await check_user_exists(
-        friend_id, db
-    ):
+    user = await get_user_by_email(email, db)
+    if user is None:
+        logger.error(f"Error user {email} not found")
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user_id = user.id
+
+    if not await get_user_by_id(user_id, db) or not await get_user_by_id(friend_id, db):
         raise HTTPException(status_code=404)
 
     result = await db.execute(

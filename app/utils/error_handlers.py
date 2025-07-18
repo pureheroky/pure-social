@@ -4,7 +4,7 @@ from fastapi.exceptions import RequestValidationError
 from utils.logger import setup_log
 import logging
 
-setup_log("auth")
+setup_log("errors", __name__)
 logger = logging.getLogger(__name__)
 
 async def http_exception_handler(request: Request, exc: Exception) -> JSONResponse:
