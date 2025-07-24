@@ -1,15 +1,22 @@
 from __future__ import annotations
+from typing import TYPE_CHECKING
 from sqlalchemy import (
     Integer,
     String,
     Text,
     TIMESTAMP,
-    ForeignKey,
 )
 from datetime import datetime, timezone
 from typing import List, Optional
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 from .base import Base
+
+if TYPE_CHECKING:
+    from .friendship import Friendship
+    from .post_reaction import PostReaction
+else:
+    from .friendship import Friendship
+    from .post_reaction import PostReaction
 
 
 class User(Base):
@@ -39,51 +46,18 @@ class User(Base):
 
     friends: Mapped[List[Friendship]] = relationship(
         "Friendship",
-        foreign_keys="[Friendship.user_id]",
+        foreign_keys=[Friendship.user_id],
         back_populates="user",
         cascade="all, delete-orphan",
     )
 
     friends_of: Mapped[List[Friendship]] = relationship(
         "Friendship",
-        foreign_keys="[Friendship.friend_id]",
+        foreign_keys=[Friendship.friend_id],
         back_populates="friend",
         cascade="all, delete-orphan",
     )
 
-
-class Friendship(Base):
-    __tablename__ = "friendship"
-    user_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
-    )
-    friend_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        TIMESTAMP(timezone=True), default=lambda: datetime.now(timezone.utc)
-    )
-    updated_at: Mapped[Optional[datetime]] = mapped_column(
-        TIMESTAMP(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
-    )
-    deleted_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True))
-    status: Mapped[Optional[str]] = mapped_column(String(20))
-    requested_at: Mapped[Optional[datetime]] = mapped_column(
-        TIMESTAMP(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        nullable=True,
-    )
-    accepted_at: Mapped[Optional[datetime]] = mapped_column(
-        TIMESTAMP(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        nullable=True,
-    )
-
-    user: Mapped[User] = relationship(
-        "User", foreign_keys=[user_id], back_populates="friends"
-    )
-    friend: Mapped[User] = relationship(
-        "User", foreign_keys=[friend_id], back_populates="friends_of"
+    reactions: Mapped[List[PostReaction]] = relationship(
+        "PostReaction", back_populates="user", cascade="all, delete-orphan"
     )

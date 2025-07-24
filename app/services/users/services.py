@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 from sqlalchemy.orm import selectinload
 from .schemas import UserData, FriendshipData
-from db.models.user import Friendship
+from db.models.friendship import Friendship
 from utils.db_utils import get_user_by_id, get_user_by_email
 from utils.logger import setup_log
 from core.config import get_settings
@@ -16,7 +16,7 @@ import io
 settings = get_settings()
 logger = setup_log("users", __name__)
 gcs_client = GCSManager(settings.GCS_BUCKET_NAME)
-ALLOWED_EXTENSIONS = {".jpg", ".png", ".png", ".webp"}
+ALLOWED_EXTENSIONS = {".jpg", ".png", ".webp"}
 
 
 async def get_user_with_email(email: str, db: AsyncSession) -> UserData:
@@ -63,7 +63,7 @@ async def upload_avatar_pic(email: str, file: UploadFile, db: AsyncSession) -> U
 
         user.profile_pic = avatar_url
         await db.commit()
-
+        await db.refresh(user)
         logger.info(f"Successfully updated profile picture for user {email}")
         return UserData.model_validate(user)
 
@@ -71,6 +71,7 @@ async def upload_avatar_pic(email: str, file: UploadFile, db: AsyncSession) -> U
         logger.error(f"Invalid image file for user: {email}")
         raise HTTPException(status_code=400, detail="Invalid image file")
     except Exception as e:
+        await db.rollback()
         logger.error(f"Error uploading profile picture for user {email}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error uploading file: {str(e)}")
 
@@ -114,7 +115,7 @@ async def request_friend(email: str, to_id: int, db: AsyncSession) -> Friendship
     if not await get_user_by_id(user_id, db) or not await get_user_by_id(to_id, db):
         logger.error(f"User with id {user_id} or {to_id} does not exist")
         raise HTTPException(
-            status_code=404, detail=f"User with id {user_id} or {to_id} d not found"
+            status_code=404, detail=f"User with id {user_id} or {to_id} does not found"
         )
 
     existing = await db.execute(
@@ -129,7 +130,7 @@ async def request_friend(email: str, to_id: int, db: AsyncSession) -> Friendship
         if existing_request.status == "accepted":
             logger.error(f"Users are friends already: {user_id} - {to_id}")
             raise HTTPException(
-                status_code=400, detail=f"{to_id} is in friendlist already"
+                status_code=400, detail=f"User {to_id} is in friendlist already"
             )
         elif existing_request.status == "requested":
             logger.error(f"Friend request already sent: {user_id} - {to_id}")
@@ -191,32 +192,31 @@ async def accept_or_decline_friend(
 
     new_status = "accepted" if action == "accept" else "declined"
 
-    friendship.status = new_status
-    if new_status == "accepted":
-        friendship.accepted_at = datetime.now(timezone.utc)
-    await db.commit()
-
-    if new_status == "declined":
-        return FriendshipData.model_validate(friendship)
-
-    reverse_friendship = Friendship(
-        user_id=user_id,
-        friend_id=from_id,
-        status=new_status,
-        requested_at=datetime.now(timezone.utc),
-        accepted_at=datetime.now(timezone.utc),
-    )
-
     try:
-        db.add(reverse_friendship)
-        await db.commit()
-        await db.refresh(reverse_friendship)
-        logger.info(
-            f"Successfully confirmed new status for friendship between: {user_id} and {from_id}"
-        )
-        return FriendshipData.model_validate(reverse_friendship)
+        async with db.begin():
+            friendship.status = new_status
+            if new_status == "accepted":
+                friendship.accepted_at = datetime.now(timezone.utc)
+                reverse_friendship = Friendship(
+                    user_id=user_id,
+                    friend_id=from_id,
+                    status=new_status,
+                    requested_at=datetime.now(timezone.utc),
+                    accepted_at=datetime.now(timezone.utc),
+                )
+                db.add(reverse_friendship)
+                await db.refresh(reverse_friendship)
+                logger.info(
+                    f"Successfully confirmed new status for friendship between: {user_id} and {from_id}"
+                )
+                return FriendshipData.model_validate(reverse_friendship)
+            else:
+                await db.refresh(friendship)
+                logger.info(
+                    f"Friendship status updated to declined between: {user_id}-{email} and {from_id}"
+                )
+                return FriendshipData.model_validate(friendship)
     except Exception as e:
-        await db.rollback()
         logger.error(f"Error while confirming new status for friendship: {e}")
         raise HTTPException(
             status_code=500, detail="Error while confirming new status for friendship"
@@ -280,7 +280,8 @@ async def delete_friend(email: str, friend_id: int, db: AsyncSession) -> dict:
     user_id = user.id
 
     if not await get_user_by_id(user_id, db) or not await get_user_by_id(friend_id, db):
-        raise HTTPException(status_code=404)
+        logger.error(f"User {user_id}-{email} or friend {friend_id} was not found")
+        raise HTTPException(status_code=404, detail="User or friend was not found")
 
     result = await db.execute(
         select(Friendship)
@@ -323,6 +324,7 @@ async def delete_friend(email: str, friend_id: int, db: AsyncSession) -> dict:
         )
         return {"detail": "Friendship deleted"}
     except:
+        await db.rollback()
         logger.error(
             f"Error while deleting friendship between {user_id} and {friend_id}"
         )

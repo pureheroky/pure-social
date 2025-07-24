@@ -1,7 +1,9 @@
 import asyncio
 from logging.config import fileConfig
 from db.models.base import Base
-from db.models.user import User, Friendship
+from db.models.user import User
+from db.models.friendship import Friendship
+from db.models.post_reaction import PostReaction
 from db.models.post import Post
 from core.config import get_settings
 from sqlalchemy import pool

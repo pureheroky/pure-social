@@ -16,7 +16,7 @@ from utils.logger import setup_log
 logger = setup_log("auth", __name__)
 
 
-def setup_tokens(email: str, user: User) -> tuple[str, str]:
+def _setup_tokens(email: str, user: User) -> tuple[str, str]:
     access = generate_access_token(email)
     refresh = generate_refresh_token(email)
     user.refresh_token = refresh
@@ -30,14 +30,14 @@ async def login_user(data: UserAuthLogin, db: AsyncSession) -> tuple[str, str]:
 
     if not user:
         logger.warning(f"Unknown user: {data.model_dump()}")
-        raise HTTPException(status_code=401, detail="User does not exist")
+        raise HTTPException(status_code=404, detail="User does not exist")
 
     if not verify_password(data.password, str(user.password_hash)):
         logger.warning(f"Wrong password: {data.model_dump()}")
         raise HTTPException(status_code=401, detail="Wrong password")
 
     try:
-        access, refresh = setup_tokens(data.email, user)
+        access, refresh = _setup_tokens(data.email, user)
         await db.commit()
     except Exception as e:
         await db.rollback()
@@ -76,7 +76,7 @@ async def register_user(data: UserAuthRegister, db: AsyncSession) -> tuple[str, 
     try:
         db.add(new_user)
         await db.flush()
-        access, refresh = setup_tokens(data.email, new_user)
+        access, refresh = _setup_tokens(data.email, new_user)
         await db.commit()
         logger.info(
             f"Successfully registered new user: {new_user.email} (id={new_user.id})"
@@ -124,7 +124,7 @@ async def refresh_tokens(refresh_token: str, db: AsyncSession) -> tuple[str, str
         )
 
     try:
-        access, refresh = setup_tokens(user_email, user)
+        access, refresh = _setup_tokens(user_email, user)
         await db.commit()
         logger.info(f"Token successfully updated for {user_email}")
     except Exception as e:

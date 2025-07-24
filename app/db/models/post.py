@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import TYPE_CHECKING
 from sqlalchemy import (
     Integer,
     String,
@@ -5,10 +7,14 @@ from sqlalchemy import (
     TIMESTAMP,
     ForeignKey,
 )
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime, timezone
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .base import Base
+
+if TYPE_CHECKING:
+    from .user import User
+    from .post_reaction import PostReaction
 
 
 class Post(Base):
@@ -32,3 +38,7 @@ class Post(Base):
     post_text: Mapped[str] = mapped_column(Text)
     post_likes: Mapped[int] = mapped_column(Integer)
     post_image: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+
+    reactions: Mapped[List[PostReaction]] = relationship(
+        "PostReaction", back_populates="post", cascade="all, delete-orphan"
+    )
