@@ -2,6 +2,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timezone
+from utils.db_utils import execute_db_operation
 from db.models.user import User
 from .schemas import UserAuthLogin, UserAuthRegister
 from core.security import (
@@ -36,14 +37,13 @@ async def login_user(data: UserAuthLogin, db: AsyncSession) -> tuple[str, str]:
         logger.warning(f"Wrong password: {data.model_dump()}")
         raise HTTPException(status_code=401, detail="Wrong password")
 
-    try:
-        access, refresh = _setup_tokens(data.email, user)
-        await db.commit()
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"Error during login database update: {e}")
-        raise HTTPException(status_code=500, detail="Error while logging user in")
-    return access, refresh
+    return await execute_db_operation(
+        db,
+        lambda: _setup_tokens(data.email, user),
+        f"Successfully logged in user {data.email}",
+        "Error while logging user in",
+        logger,
+    )
 
 
 async def register_user(data: UserAuthRegister, db: AsyncSession) -> tuple[str, str]:
@@ -73,19 +73,16 @@ async def register_user(data: UserAuthRegister, db: AsyncSession) -> tuple[str, 
         refresh_token=None,
     )
 
-    try:
-        db.add(new_user)
-        await db.flush()
-        access, refresh = _setup_tokens(data.email, new_user)
-        await db.commit()
-        logger.info(
-            f"Successfully registered new user: {new_user.email} (id={new_user.id})"
-        )
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"Error while registering new user: {e}")
-        raise HTTPException(status_code=500, detail="Error while creating new user")
-    return access, refresh
+    return await execute_db_operation(
+        db,
+        lambda: (
+            db.add(new_user),
+            _setup_tokens(data.email, new_user),
+        )[-1],
+        f"Successfully registered new user {data.email} (id={new_user.id})",
+        "Error while registering new user",
+        logger,
+    )
 
 
 async def refresh_tokens(refresh_token: str, db: AsyncSession) -> tuple[str, str]:
@@ -123,12 +120,10 @@ async def refresh_tokens(refresh_token: str, db: AsyncSession) -> tuple[str, str
             status_code=401, detail="Provided token is not the same as in database"
         )
 
-    try:
-        access, refresh = _setup_tokens(user_email, user)
-        await db.commit()
-        logger.info(f"Token successfully updated for {user_email}")
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"Error while updating user tokens: {e}")
-        raise HTTPException(status_code=500, detail="Error while updating user tokens")
-    return access, refresh
+    return await execute_db_operation(
+        db,
+        lambda: _setup_tokens(user_email, user),
+        f"Token successfully updated for {user_email}",
+        "Error while updating user tokens",
+        logger,
+    )

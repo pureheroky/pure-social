@@ -49,21 +49,25 @@ async def friend_request(
 async def friend_request_status(
     request: Request, friend_id: int, db: AsyncSession = Depends(get_db)
 ):
-    return request_friend_status(request.state.user_email, friend_id, db)
+    return await request_friend_status(request.state.user_email, friend_id, db)
 
 
 @router.patch("/friendship/accept", response_model=FriendshipData)
 async def friend_accept(
     request: Request, requested_id: int, db: AsyncSession = Depends(get_db)
 ):
-    return await accept_or_decline_friend(request.state.user_email, requested_id, "accept", db)
+    return await accept_or_decline_friend(
+        request.state.user_email, requested_id, "accept", db
+    )
 
 
 @router.patch("/friendship/decline", response_model=FriendshipData)
 async def friend_decline(
     request: Request, requested_id: int, db: AsyncSession = Depends(get_db)
 ):
-    return await accept_or_decline_friend(request.state.user_email, requested_id, "decline", db)
+    return await accept_or_decline_friend(
+        request.state.user_email, requested_id, "decline", db
+    )
 
 
 @router.delete("/friendship/delete")

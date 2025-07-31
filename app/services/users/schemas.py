@@ -15,12 +15,15 @@ class UserData(Base):
     username: str
     profile_pic: str | None
 
+
 class FriendshipData(Base):
     user_id: int
     friend_id: int
     status: str
     requested_at: datetime
     accepted_at: datetime | None
+    updated_at: datetime
+
 
 class UserDataDetailed(UserData):
     email: str

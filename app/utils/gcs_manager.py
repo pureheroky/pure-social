@@ -16,6 +16,15 @@ class GCSManager:
     def bucket_name(self):
         return self._bucket_name
 
+    def get_bucket(self, bucket_name):
+        current_bucket_name = bucket_name or self._bucket_name
+        bucket = self.client.bucket(current_bucket_name)
+        return bucket
+
+    def check_file_exist(self, bucket_name, blob_name):
+        bucket = self.get_bucket(bucket_name)
+        return bucket.get_blob(blob_name)
+
     def upload_file(
         self,
         file,
@@ -24,8 +33,7 @@ class GCSManager:
         dir: str,
         bucket_name: str | None = None,
     ) -> str:
-        current_bucket_name = bucket_name or self._bucket_name
-        bucket = self.client.bucket(current_bucket_name)
+        bucket = self.get_bucket(bucket_name)
 
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
         blob_name = (

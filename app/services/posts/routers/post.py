@@ -43,10 +43,10 @@ async def delete_user_post(
 @router.patch("/edit_post")
 async def edit_user_post(
     request: Request,
-    post_text: str | None = Form(...),
+    post_text: str | None = Form(None),
     post_id: str = Form(...),
-    post_image: UploadFile | None = File(...),
-    remove_image: bool = Form(False),
+    post_image: UploadFile | None = File(None),
+    remove_image: str = Form("false"),
     db: AsyncSession = Depends(get_db),
 ):
     return await edit_post(
