@@ -15,6 +15,7 @@ class PostData(Base):
     created_at: datetime
     post_text: str
     post_likes: int
+    post_dislikes: int
     post_image: str | None
 
 

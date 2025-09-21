@@ -19,7 +19,7 @@ from core.config import get_settings
 logger = setup_log("posts", __name__)
 settings = get_settings()
 gcs_client = GCSManager(settings.GCS_BUCKET_NAME)
-ALLOWED_EXTENSIONS = {".jpg", ".png", ".webp"}
+ALLOWED_EXTENSIONS = {".jpg", ".png", ".webp", ".jpeg"}
 
 
 async def get_posts(email: str, db: AsyncSession) -> List[PostData]:
@@ -57,6 +57,7 @@ async def create_post(
         post_text=post_text,
         post_image=post_image_url,
         post_likes=0,
+        post_dislikes=0,
     )
 
     await execute_db_operation(
@@ -190,6 +191,17 @@ async def like_post(email: str, post_id: int, db: AsyncSession) -> dict:
     if existing_reaction.scalar_one_or_none():
         logger.info(f"User {email} already liked post {post_id}")
         return {"message": "Already liked post", "status_code": 400}
+    
+    existing_dislike = await db.execute(
+        select(PostReaction).filter_by(
+            post_id=post_id, user_id=user.id, reaction_type="dislike"
+        )
+    )
+    dislike_reaction = existing_dislike.scalar_one_or_none()
+    if dislike_reaction:
+        post.post_dislikes -= 1
+        db.delete(dislike_reaction)
+        logger.info(f"Removed dislike from user {email} for post {post_id}")
 
     post.post_likes += 1
 
@@ -209,6 +221,7 @@ async def like_post(email: str, post_id: int, db: AsyncSession) -> dict:
         f"User {email} liked post {post_id}",
         f"Error while adding like to post {post_id} from {user}",
         logger,
+        use_flush=True,
         refresh_object=new_reaction,
     )
 
@@ -216,7 +229,6 @@ async def like_post(email: str, post_id: int, db: AsyncSession) -> dict:
 async def dislike_post(email: str, post_id: int, db: AsyncSession) -> dict:
     logger.info(f"User {email} disliked post {post_id}")
     user = await require_user_by_email(email, db, logger)
-
     post = await db.execute(select(Post).filter_by(id=post_id))
     post = post.scalar_one_or_none()
 
@@ -224,31 +236,118 @@ async def dislike_post(email: str, post_id: int, db: AsyncSession) -> dict:
         logger.error(f"Post {post_id} was not found")
         raise HTTPException(status_code=400, detail="Post was not found")
 
-    reaction = await db.execute(
+    existing_reaction = await db.execute(
+        select(PostReaction).filter_by(
+            post_id=post_id, user_id=user.id, reaction_type="dislike"
+        )
+    )
+
+    if existing_reaction.scalar_one_or_none():
+        logger.info(f"User {email} already disliked post {post_id}")
+        return {"message": "Already disliked post", "status_code": 400}
+    
+    existing_like = await db.execute(
         select(PostReaction).filter_by(
             post_id=post_id, user_id=user.id, reaction_type="like"
         )
     )
+    like_reaction = existing_like.scalar_one_or_none()
+    if like_reaction:
+        post.post_likes -= 1
+        db.delete(like_reaction)
+        logger.info(f"Removed like from user {email} for post {post_id}")
 
-    reaction = reaction.scalar_one_or_none()
+    post.post_dislikes += 1
+
+    new_reaction = PostReaction(
+        post_id=post_id,
+        user_id=user.id,
+        reaction_type="dislike",
+        created_at=datetime.now(timezone.utc),
+    )
+
+    return await execute_db_operation(
+        db,
+        lambda: (
+            db.add(new_reaction),
+            {"message": "Post disliked successfully", "status_code": 200},
+        )[-1],
+        f"User {email} disliked post {post_id}",
+        f"Error while adding dislike to post {post_id} from {user}",
+        logger,
+        use_flush=True,
+        refresh_object=new_reaction,
+    )
+
+async def unlike_post(email: str, post_id: int, db: AsyncSession) -> dict:
+    logger.info(f"User {email} attempting to unlike post {post_id}")
+    user = await require_user_by_email(email, db, logger)
+    post = await db.execute(select(Post).filter_by(id=post_id))
+    post = post.scalar_one_or_none()
+
+    if post is None:
+        logger.error(f"Post {post_id} was not found")
+        raise HTTPException(status_code=400, detail="Post was not found")
+
+    existing_reaction = await db.execute(
+        select(PostReaction).filter_by(
+            post_id=post_id, user_id=user.id, reaction_type="like"
+        )
+    )
+    reaction = existing_reaction.scalar_one_or_none()
 
     if reaction is None:
         logger.info(f"User {email} has not liked post {post_id}")
-        return {"message": "Not liked post", "status_code": 400}
+        return {"message": "Post not liked", "status_code": 400}
 
-    if post.post_likes > 0:
-        post.post_likes -= 1
-    else:
-        logger.error(f"Trying to decrease less than zero post {post_id}")
+    post.post_likes -= 1
 
     return await execute_db_operation(
         db,
         lambda: (
             db.delete(reaction),
-            {"message": "Post liked successfully", "status_code": 200},
+            {"message": "Post unliked successfully", "status_code": 200},
         )[-1],
-        f"User {email} liked post {post_id}",
-        f"Error while adding like to post {post_id} from {user}",
+        f"User {email} unliked post {post_id}",
+        f"Error while removing like from post {post_id} by {user}",
         logger,
-        refresh_object=reaction,
+        use_flush=True,
+        refresh_object=post,
+    )
+
+
+async def undislike_post(email: str, post_id: int, db: AsyncSession) -> dict:
+    logger.info(f"User {email} attempting to undislike post {post_id}")
+    user = await require_user_by_email(email, db, logger)
+    post = await db.execute(select(Post).filter_by(id=post_id))
+    post = post.scalar_one_or_none()
+
+    if post is None:
+        logger.error(f"Post {post_id} was not found")
+        raise HTTPException(status_code=400, detail="Post was not found")
+
+    existing_reaction = await db.execute(
+        select(PostReaction).filter_by(
+            post_id=post_id, user_id=user.id, reaction_type="dislike"
+        )
+    )
+    reaction = existing_reaction.scalar_one_or_none()
+
+    if reaction is None:
+        logger.info(f"User {email} has not disliked post {post_id}")
+        return {"message": "Post not disliked", "status_code": 400}
+
+    post.post_dislikes -= 1
+
+    return await execute_db_operation(
+        db,
+        lambda: (
+            db.delete(reaction),
+            {"message": "Post undisliked successfully", "status_code": 200},
+        )[-1],
+        f"User {email} undisliked post {post_id}",
+        f"Error while removing dislike from post {post_id} by {user}",
+        logger,
+        use_flush=True,
+        refresh_object=post,
     )

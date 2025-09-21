@@ -37,6 +37,7 @@ class Post(Base):
     )
     post_text: Mapped[str] = mapped_column(Text)
     post_likes: Mapped[int] = mapped_column(Integer)
+    post_dislikes: Mapped[int] = mapped_column(Integer)
     post_image: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
 
     reactions: Mapped[List[PostReaction]] = relationship(

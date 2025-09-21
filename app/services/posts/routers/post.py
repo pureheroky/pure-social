@@ -72,7 +72,7 @@ async def dislike_user_post(
     return await dislike_post(request.state.user_email, post_id, db)
 
 
-@router.post("/get_reacted_posts")
+@router.get("/get_reacted_posts")
 async def get_user_reacted_posts(
     request: Request,
     db: AsyncSession = Depends(get_db),
