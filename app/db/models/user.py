@@ -14,9 +14,9 @@ from .base import Base
 if TYPE_CHECKING:
     from .friendship import Friendship
     from .post_reaction import PostReaction
-else:
-    from .friendship import Friendship
-    from .post_reaction import PostReaction
+    from .comment import Comment
+    from .comment_reaction import CommentReaction
+    from .post import Post
 
 
 class User(Base):
@@ -46,18 +46,30 @@ class User(Base):
 
     friends: Mapped[List[Friendship]] = relationship(
         "Friendship",
-        foreign_keys=[Friendship.user_id],
+        foreign_keys="Friendship.user_id",
         back_populates="user",
         cascade="all, delete-orphan",
     )
 
     friends_of: Mapped[List[Friendship]] = relationship(
         "Friendship",
-        foreign_keys=[Friendship.friend_id],
+        foreign_keys="Friendship.friend_id",
         back_populates="friend",
         cascade="all, delete-orphan",
     )
 
     reactions: Mapped[List[PostReaction]] = relationship(
         "PostReaction", back_populates="user", cascade="all, delete-orphan"
+    )
+
+    comments: Mapped[List[Comment]] = relationship(
+        "Comment", back_populates="user", cascade="all, delete-orphan"
+    )
+
+    comment_reactions: Mapped[List[CommentReaction]] = relationship(
+        "CommentReaction", back_populates="user", cascade="all, delete-orphan"
+    )
+
+    posts: Mapped[List[Post]] = relationship(
+        "Post", back_populates="user", cascade="all, delete-orphan"
     )

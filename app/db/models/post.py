@@ -10,11 +10,13 @@ from sqlalchemy import (
 from typing import Optional, List
 from datetime import datetime, timezone
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from .base import Base
 
 if TYPE_CHECKING:
-    from .user import User
     from .post_reaction import PostReaction
+    from .comment import Comment
+    from .user import User
 
 
 class Post(Base):
@@ -36,10 +38,14 @@ class Post(Base):
         TIMESTAMP(timezone=True), nullable=True
     )
     post_text: Mapped[str] = mapped_column(Text)
-    post_likes: Mapped[int] = mapped_column(Integer)
-    post_dislikes: Mapped[int] = mapped_column(Integer)
+    post_likes: Mapped[int] = mapped_column(Integer, default=0)
+    post_dislikes: Mapped[int] = mapped_column(Integer, default=0)
     post_image: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
 
     reactions: Mapped[List[PostReaction]] = relationship(
         "PostReaction", back_populates="post", cascade="all, delete-orphan"
     )
+    comments: Mapped[List[Comment]] = relationship(
+        "Comment", back_populates="post", cascade="all, delete-orphan"
+    )
+    user: Mapped[User] = relationship("User", back_populates="posts")

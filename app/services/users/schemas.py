@@ -22,7 +22,6 @@ class FriendshipData(Base):
     status: str
     requested_at: datetime
     accepted_at: datetime | None
-    updated_at: datetime
 
 
 class UserDataDetailed(UserData):

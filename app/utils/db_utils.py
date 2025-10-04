@@ -3,6 +3,7 @@ from typing import Callable, Optional, TypeVar, Any, Awaitable, cast
 from utils.gcs_manager import GCSManager
 from db.models.post import Post
 from db.models.user import User
+from db.models.comment import Comment
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException, UploadFile
@@ -14,9 +15,37 @@ import asyncio
 T = TypeVar("T")
 
 
-async def get_user_by_id(user_id: int, db: AsyncSession) -> User | None:
+async def require_user_by_id(user_id: int, db: AsyncSession, logger: Logger) -> User | None:
     result = await db.execute(select(User).filter_by(id=user_id))
-    return result.scalar_one_or_none()
+    user = result.scalar_one_or_none()
+
+    if user is None:
+        logger.error(f"User with id {user_id} was not found")
+        raise HTTPException(status_code=400, detail="User was not found")
+
+    return user
+
+
+async def require_comment_author(
+    comment_id: int, user_id: int, db: AsyncSession, logger: Logger
+) -> Comment:
+    """Require the user to be the author of the comment."""
+    result = await db.execute(select(Comment).filter_by(id=comment_id))
+    comment = result.scalar_one_or_none()
+
+    if comment is None:
+        logger.error(f"Comment {comment_id} was not found")
+        raise HTTPException(status_code=400, detail="Comment was not found")
+
+    if comment.user_id != user_id:
+        logger.error(
+            f"User {user_id} cannot delete comment {comment_id} (author: {comment.user_id})"
+        )
+        raise HTTPException(
+            status_code=400, detail="User is not the author of the comment"
+        )
+
+    return comment
 
 
 async def get_user_by_email(email: str, db: AsyncSession) -> User | None:

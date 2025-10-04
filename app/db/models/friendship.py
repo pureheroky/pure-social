@@ -1,10 +1,11 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING
+from enum import Enum as PyEnum
 from sqlalchemy import (
     Integer,
-    String,
     TIMESTAMP,
     ForeignKey,
+    Enum
 )
 from datetime import datetime, timezone
 from typing import Optional
@@ -14,6 +15,13 @@ from .base import Base
 
 if TYPE_CHECKING:
     from .user import User
+
+
+class FriendshipStatus(PyEnum):
+    PENDING = "pending"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+    BLOCKED = "blocked"
 
 
 class Friendship(Base):
@@ -33,7 +41,9 @@ class Friendship(Base):
         onupdate=lambda: datetime.now(timezone.utc),
     )
     deleted_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True))
-    status: Mapped[Optional[str]] = mapped_column(String(20))
+    status: Mapped[Optional[FriendshipStatus]] = mapped_column(
+        Enum(FriendshipStatus), default=FriendshipStatus.PENDING
+    )
     requested_at: Mapped[Optional[datetime]] = mapped_column(
         TIMESTAMP(timezone=True),
         default=lambda: datetime.now(timezone.utc),

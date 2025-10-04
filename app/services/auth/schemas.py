@@ -1,25 +1,29 @@
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator, EmailStr
 from typing_extensions import Self
 
 
-class UserAuthResponse(BaseModel):
+class Base(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+
+class UserAuthResponse(Base):
     access_token: str
     refresh_token: str
 
 
-class UserAuthLogin(BaseModel):
-    email: str
+class UserAuthLogin(Base):
+    email: EmailStr
     password: str
 
 
-class UserUpdateRefresh(BaseModel):
+class UserUpdateRefresh(Base):
     refresh_token: str
 
 
-class UserAuthRegister(BaseModel):
+class UserAuthRegister(Base):
     name: str
     username: str
-    email: str
+    email: EmailStr
     password: str
     repeat_password: str
     age: int
@@ -34,7 +38,7 @@ class UserAuthRegister(BaseModel):
     @classmethod
     def check_password_length(cls, v: str) -> str:
         if len(v) < 8:
-            raise ValueError("Password length should be more than 8")
+            raise ValueError("Password length should be at least 8 characters")
         return v
 
     @field_validator("age")
