@@ -1,5 +1,7 @@
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator, EmailStr
 from typing_extensions import Self
+from services.users.schemas import UserData
+
 
 
 class Base(BaseModel):
@@ -9,6 +11,7 @@ class Base(BaseModel):
 class UserAuthResponse(Base):
     access_token: str
     refresh_token: str
+    user: UserData
 
 
 class UserAuthLogin(Base):

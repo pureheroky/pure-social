@@ -17,15 +17,15 @@ from utils.logger import setup_log
 logger = setup_log("auth", __name__)
 
 
-def _setup_tokens(email: str, user: User) -> tuple[str, str]:
+def _setup_tokens(email: str, user: User) -> tuple[str, str, User]:
     """Generate access and refresh tokens, update user's refresh token."""
     access = generate_access_token(email)
     refresh = generate_refresh_token(email)
     user.refresh_token = refresh
-    return access, refresh
+    return access, refresh, user
 
 
-async def login_user(data: UserAuthLogin, db: AsyncSession) -> tuple[str, str]:
+async def login_user(data: UserAuthLogin, db: AsyncSession) -> tuple[str, str, User]:
     """Authenticate user login and generate tokens."""
     logger.info(f"Trying to log in user email: {data.email[:5]}...")
     result = await db.execute(select(User).filter_by(email=data.email))
@@ -39,7 +39,7 @@ async def login_user(data: UserAuthLogin, db: AsyncSession) -> tuple[str, str]:
         logger.warning(f"Wrong password for email: {data.email[:5]}...")
         raise HTTPException(status_code=401, detail="Wrong password")
 
-    async def operation() -> tuple[str, str]:
+    async def operation() -> tuple[str, str, User]:
         return _setup_tokens(data.email, user)
 
     return await execute_db_operation(
@@ -52,7 +52,9 @@ async def login_user(data: UserAuthLogin, db: AsyncSession) -> tuple[str, str]:
     )
 
 
-async def register_user(data: UserAuthRegister, db: AsyncSession) -> tuple[str, str]:
+async def register_user(
+    data: UserAuthRegister, db: AsyncSession
+) -> tuple[str, str, User]:
     """Register a new user and generate tokens."""
     logger.info(f"Trying to register user email: {data.email[:5]}...")
     result = await db.execute(
@@ -82,9 +84,9 @@ async def register_user(data: UserAuthRegister, db: AsyncSession) -> tuple[str, 
         refresh_token=None,
     )
 
-    async def operation() -> tuple[str, str]:
+    async def operation() -> tuple[str, str, User]:
         db.add(new_user)
-        await db.flush()  # Generate ID early for logging
+        await db.flush()
         logger.info(f"Created user with id {new_user.id}")
         return _setup_tokens(data.email, new_user)
 
@@ -139,3 +141,17 @@ async def refresh_tokens(refresh_token: str, db: AsyncSession) -> tuple[str, str
         logger,
         use_flush=True,
     )
+
+
+async def verify_token(user_email: str, db: AsyncSession) -> User:
+    logger.info(f"Verifying token for user: {user_email[:5]}...")
+    if not user_email:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    result = await db.execute(select(User).filter_by(email=user_email))
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+
+    return user

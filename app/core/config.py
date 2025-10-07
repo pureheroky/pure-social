@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = Field(30, gt=0)
     ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(7, gt=0)
     DB_URI: SecretStr = Field(..., description="database url")
+    REDIS_URL: str = Field(..., description="Redis url")
     GCS_CREDENTIALS_PATH: str = Field(
         ..., description="Path to Google Cloud service account JSON file"
     )
@@ -31,4 +32,4 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()  # type: ignore[arg-type]
+    return Settings()

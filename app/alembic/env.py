@@ -7,6 +7,8 @@ from db.models.post_reaction import PostReaction
 from db.models.post import Post
 from db.models.comment import Comment
 from db.models.comment_reaction import CommentReaction
+from db.models.chat import Chat
+from db.models.message import Message
 from core.config import get_settings
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
