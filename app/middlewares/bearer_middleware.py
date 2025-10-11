@@ -1,10 +1,9 @@
 from fastapi import Request
+from fastapi.responses import JSONResponse
 from core.security import decode_token
 from starlette.middleware.base import BaseHTTPMiddleware
 from utils.logger import setup_log
-from fastapi.responses import JSONResponse
 import jwt
-
 
 class BearerCheckMiddleware(BaseHTTPMiddleware):
     def __init__(self, app):
@@ -34,10 +33,14 @@ class BearerCheckMiddleware(BaseHTTPMiddleware):
             return response
 
         auth_header = request.headers.get("Authorization")
-        if not auth_header or not auth_header.startswith("Bearer "):
-            return JSONResponse(status_code=401, content={"detail": "Missing token"})
+        token = None
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header[len("Bearer ") :]
+        else:
+            token = request.cookies.get("access_token")
 
-        token = auth_header[len("Bearer ") :]
+        if not token:
+            return JSONResponse(status_code=401, content={"detail": "Missing token"})
 
         try:
             payload = decode_token(str(token))

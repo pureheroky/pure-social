@@ -41,35 +41,3 @@ class CommentReaction(Base):
     __table_args__ = (
         UniqueConstraint("user_id", "comment_id", name="uq_comment_user_reaction"),
     )
-
-
-# @event.listens_for(CommentReaction, "after_insert")
-# def after_insert_comment_reaction(mapper, connection, target):
-#     from .comment import Comment
-
-#     session = object_session(target)
-#     if not session:
-#         return
-
-#     comment = session.get(Comment, target.comment_id)
-
-#     if target.reaction_type == ReactionType.LIKE:
-#         comment.comment_likes = (comment.comment_likes or 0) + 1
-#     elif target.reaction_type == ReactionType.DISLIKE:
-#         comment.comment_dislikes = (comment.comment_dislikes or 0) + 1
-
-
-# @event.listens_for(CommentReaction, "after_delete")
-# def after_delete_comment_reaction(mapper, connection, target):
-#     from .comment import Comment
-
-#     session = object_session(target)
-#     if not session:
-#         return
-
-#     comment = session.get(Comment, target.comment_id)
-
-#     if target.reaction_type == ReactionType.LIKE:
-#         comment.comment_likes = max(0, (comment.comment_likes or 0) - 1)
-#     elif target.reaction_type == ReactionType.DISLIKE:
-#         comment.comment_dislikes = max(0, (comment.comment_dislikes or 0) - 1)

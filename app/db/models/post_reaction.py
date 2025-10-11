@@ -47,33 +47,3 @@ class PostReaction(Base):
     )
 
 
-# @event.listens_for(PostReaction, "after_insert")
-# def after_insert_post_reaction(mapper, connection, target):
-#     from .post import Post
-
-#     session = object_session(target)
-#     if not session:
-#         return
-
-#     post = session.get(Post, target.post_id)
-
-#     if target.reaction_type == ReactionType.LIKE:
-#         post.post_likes = (post.post_likes or 0) + 1
-#     elif target.reaction_type == ReactionType.DISLIKE:
-#         post.post_dislikes = (post.post_dislikes or 0) + 1
-
-
-# @event.listens_for(PostReaction, "after_delete")
-# def after_delete_post_reaction(mapper, connection, target):
-#     from .post import Post
-
-#     session = object_session(target)
-#     if not session:
-#         return
-
-#     post = session.get(Post, target.post_id)
-
-#     if target.reaction_type == ReactionType.LIKE:
-#         post.post_likes = max((post.post_likes or 0) - 1, 0)
-#     elif target.reaction_type == ReactionType.DISLIKE:
-#         post.post_dislikes = max((post.post_dislikes or 0) - 1, 0)

@@ -37,7 +37,10 @@ async def get_posts(
     query = (
         select(Post)
         .filter_by(author_id=user.id)
-        .options(selectinload(Post.comments))
+        .options(
+            selectinload(Post.comments).selectinload(Comment.user),
+            selectinload(Post.reactions) 
+        )
         .limit(limit)
         .offset(offset)
         .order_by(Post.created_at.desc())
@@ -49,8 +52,15 @@ async def get_posts(
         logger.info(f"User {user.id} has no posts")
         return []
 
-    return [PostData.model_validate(post) for post in posts]
-
+    post_datas = []
+    for post in posts:
+        pd = PostData.model_validate(post)
+        pd.user_reaction = next(
+            (r.reaction_type.value for r in post.reactions if r.user_id == user.id),
+            None
+        )
+        post_datas.append(pd)
+    return post_datas
 
 async def create_post(
     email: str,
@@ -131,7 +141,6 @@ async def edit_post(
     db: AsyncSession,
     post_image: Optional[UploadFile] = None,
 ) -> PostData:
-    """Edit post text and/or image."""
     logger.info(f"Editing post {post_id} for user email: {email[:5]}...")
     user = await require_user_by_email(email, db, logger)
     post = await require_post_author(post_id, user.id, db, logger)
@@ -182,7 +191,6 @@ async def edit_post(
         use_flush=True,
     )
 
-
 async def get_reacted_posts(email: str, db: AsyncSession) -> List[PostData]:
     """Retrieve posts that the user has reacted to, deduplicated."""
     logger.info(f"Retrieving reacted posts for user email: {email[:5]}...")
@@ -193,7 +201,10 @@ async def get_reacted_posts(email: str, db: AsyncSession) -> List[PostData]:
         .distinct()
         .join(PostReaction, Post.id == PostReaction.post_id)
         .filter(PostReaction.user_id == user.id)
-        .options(selectinload(Post.comments))
+        .options(
+            selectinload(Post.comments).selectinload(Comment.user),
+            selectinload(Post.reactions)  
+        )
         .order_by(Post.created_at.desc())
     )
     result = await db.execute(query)
@@ -203,11 +214,19 @@ async def get_reacted_posts(email: str, db: AsyncSession) -> List[PostData]:
         logger.info(f"No reacted posts found for user {user.id}")
         return []
 
-    return [PostData.model_validate(post) for post in posts]
+    post_datas = []
+    for post in posts:
+        pd = PostData.model_validate(post)
+        pd.user_reaction = next(
+            (r.reaction_type.value for r in post.reactions if r.user_id == user.id),
+            None
+        )
+        post_datas.append(pd)
+    return post_datas
 
 
 async def like_post(email: str, post_id: int, db: AsyncSession) -> dict:
-    """Like a post, switching reaction if present, and update counters."""
+    """Like a post: toggle if already liked, switch if disliked."""
     logger.info(f"Liking post {post_id} for user email: {email[:5]}...")
     user = await require_user_by_email(email, db, logger)
 
@@ -221,12 +240,12 @@ async def like_post(email: str, post_id: int, db: AsyncSession) -> dict:
     )
     existing = existing_result.scalar_one_or_none()
 
-    if existing and existing.reaction_type == ReactionType.LIKE:
-        raise HTTPException(status_code=400, detail="Already liked")
-
     async def operation() -> dict:
         if existing:
-            if existing.reaction_type == ReactionType.DISLIKE:
+            if existing.reaction_type == ReactionType.LIKE:
+                await db.delete(existing)
+                post.post_likes -= 1
+            elif existing.reaction_type == ReactionType.DISLIKE:
                 existing.reaction_type = ReactionType.LIKE
                 existing.updated_at = datetime.now(timezone.utc)
                 await db.execute(
@@ -268,7 +287,7 @@ async def like_post(email: str, post_id: int, db: AsyncSession) -> dict:
 
 
 async def dislike_post(email: str, post_id: int, db: AsyncSession) -> dict:
-    """Dislike a post, switching reaction if present, and update counters."""
+    """Dislike a post: toggle if already disliked, switch if liked."""
     logger.info(f"Disliking post {post_id} for user email: {email[:5]}...")
     user = await require_user_by_email(email, db, logger)
 
@@ -282,12 +301,12 @@ async def dislike_post(email: str, post_id: int, db: AsyncSession) -> dict:
     )
     existing = existing_result.scalar_one_or_none()
 
-    if existing and existing.reaction_type == ReactionType.DISLIKE:
-        raise HTTPException(status_code=400, detail="Already disliked")
-
     async def operation() -> dict:
         if existing:
-            if existing.reaction_type == ReactionType.LIKE:
+            if existing.reaction_type == ReactionType.DISLIKE:
+                await db.delete(existing)
+                post.post_dislikes -= 1
+            elif existing.reaction_type == ReactionType.LIKE:
                 existing.reaction_type = ReactionType.DISLIKE
                 existing.updated_at = datetime.now(timezone.utc)
                 await db.execute(
@@ -328,97 +347,15 @@ async def dislike_post(email: str, post_id: int, db: AsyncSession) -> dict:
         use_flush=True,
     )
 
-
-async def unlike_post(email: str, post_id: int, db: AsyncSession) -> dict:
-    """Remove like from a post and update counters."""
-    logger.info(f"Unliking post {post_id} for user email: {email[:5]}...")
-    user = await require_user_by_email(email, db, logger)
-
-    post_result = await db.execute(select(Post).filter_by(id=post_id))
-    post = post_result.scalar_one_or_none()
-    if not post:
-        raise HTTPException(status_code=404, detail="Post not found")
-
-    reaction_result = await db.execute(
-        select(PostReaction).filter_by(
-            post_id=post_id, user_id=user.id, reaction_type=ReactionType.LIKE
-        )
-    )
-    reaction = reaction_result.scalar_one_or_none()
-    if not reaction:
-        raise HTTPException(status_code=400, detail="Post not liked")
-
-    async def operation() -> dict:
-        await db.delete(reaction)
-        post.post_likes -= 1
-        await db.flush()
-        await db.refresh(post)
-
-        post.post_likes = max(0, post.post_likes)
-        post.post_dislikes = max(0, post.post_dislikes)
-
-        return {"detail": "Post unliked successfully"}
-
-    return await execute_db_operation(
-        db,
-        operation,
-        f"Successfully unliked post {post_id} for user {user.id}",
-        f"Error unliking post {post_id}",
-        logger,
-        refresh_object=post,
-        use_flush=True,
-    )
-
-
-async def undislike_post(email: str, post_id: int, db: AsyncSession) -> dict:
-    """Remove dislike from a post and update counters."""
-    logger.info(f"Undisliking post {post_id} for user email: {email[:5]}...")
-    user = await require_user_by_email(email, db, logger)
-
-    post_result = await db.execute(select(Post).filter_by(id=post_id))
-    post = post_result.scalar_one_or_none()
-    if not post:
-        raise HTTPException(status_code=404, detail="Post not found")
-
-    reaction_result = await db.execute(
-        select(PostReaction).filter_by(
-            post_id=post_id, user_id=user.id, reaction_type=ReactionType.DISLIKE
-        )
-    )
-    reaction = reaction_result.scalar_one_or_none()
-    if not reaction:
-        raise HTTPException(status_code=400, detail="Post not disliked")
-
-    async def operation() -> dict:
-        await db.delete(reaction)
-        post.post_dislikes -= 1
-        await db.flush()
-        await db.refresh(post)
-
-        post.post_likes = max(0, post.post_likes)
-        post.post_dislikes = max(0, post.post_dislikes)
-
-        return {"detail": "Post undisliked successfully"}
-
-    return await execute_db_operation(
-        db,
-        operation,
-        f"Successfully undisliked post {post_id} for user {user.id}",
-        f"Error undisliking post {post_id}",
-        logger,
-        refresh_object=post,
-        use_flush=True,
-    )
-
-
-async def get_comments(post_id: int, db: AsyncSession) -> List[PostCommentData]:
-    """Retrieve all comments for a post with reactions."""
+async def get_comments(
+    post_id: int, db: AsyncSession, limit: int = 50, offset: int = 0
+) -> List[PostCommentData]:
+    """Retrieve all comments for a post with reactions and pagination."""
     logger.info(f"Retrieving comments for post {post_id}...")
     post_result = await db.execute(select(Post).filter_by(id=post_id))
     post = post_result.scalar_one_or_none()
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
-
     query = (
         select(Comment)
         .filter_by(post_id=post_id)
@@ -427,12 +364,12 @@ async def get_comments(post_id: int, db: AsyncSession) -> List[PostCommentData]:
             selectinload(Comment.reactions),
         )
         .order_by(Comment.created_at.asc())
+        .limit(limit)
+        .offset(offset)
     )
     result = await db.execute(query)
     comments = result.scalars().all()
-
     return [PostCommentData.model_validate(comment) for comment in comments]
-
 
 async def add_comment(
     post_id: int, comment_text: str, email: str, db: AsyncSession
@@ -492,7 +429,7 @@ async def delete_comment(email: str, comment_id: int, db: AsyncSession) -> dict:
 
 
 async def like_comment(email: str, comment_id: int, db: AsyncSession) -> dict:
-    """Like a comment, switching reaction if present, and update counters."""
+    """Like a comment: toggle if already liked, switch if disliked."""
     logger.info(f"Liking comment {comment_id} for user email: {email[:5]}...")
     user = await require_user_by_email(email, db, logger)
 
@@ -506,12 +443,12 @@ async def like_comment(email: str, comment_id: int, db: AsyncSession) -> dict:
     )
     existing = existing_result.scalar_one_or_none()
 
-    if existing and existing.reaction_type == ReactionType.LIKE:
-        raise HTTPException(status_code=400, detail="Already liked")
-
     async def operation() -> dict:
         if existing:
-            if existing.reaction_type == ReactionType.DISLIKE:
+            if existing.reaction_type == ReactionType.LIKE:
+                await db.delete(existing)
+                comment.comment_likes -= 1
+            elif existing.reaction_type == ReactionType.DISLIKE:
                 existing.reaction_type = ReactionType.LIKE
                 existing.updated_at = datetime.now(timezone.utc)
                 await db.execute(
@@ -553,7 +490,7 @@ async def like_comment(email: str, comment_id: int, db: AsyncSession) -> dict:
 
 
 async def dislike_comment(email: str, comment_id: int, db: AsyncSession) -> dict:
-    """Dislike a comment, switching reaction if present, and update counters."""
+    """Dislike a comment: toggle if already disliked, switch if liked."""
     logger.info(f"Disliking comment {comment_id} for user email: {email[:5]}...")
     user = await require_user_by_email(email, db, logger)
 
@@ -567,12 +504,12 @@ async def dislike_comment(email: str, comment_id: int, db: AsyncSession) -> dict
     )
     existing = existing_result.scalar_one_or_none()
 
-    if existing and existing.reaction_type == ReactionType.DISLIKE:
-        raise HTTPException(status_code=400, detail="Already disliked")
-
     async def operation() -> dict:
         if existing:
-            if existing.reaction_type == ReactionType.LIKE:
+            if existing.reaction_type == ReactionType.DISLIKE:
+                await db.delete(existing)
+                comment.comment_dislikes -= 1
+            elif existing.reaction_type == ReactionType.LIKE:
                 existing.reaction_type = ReactionType.DISLIKE
                 existing.updated_at = datetime.now(timezone.utc)
                 await db.execute(
@@ -608,88 +545,6 @@ async def dislike_comment(email: str, comment_id: int, db: AsyncSession) -> dict
         operation,
         f"Successfully disliked comment {comment_id} for user {user.id}",
         f"Error disliking comment {comment_id}",
-        logger,
-        refresh_object=comment,
-        use_flush=True,
-    )
-
-
-async def unlike_comment(email: str, comment_id: int, db: AsyncSession) -> dict:
-    """Remove like from a comment and update counters."""
-    logger.info(f"Unliking comment {comment_id} for user email: {email[:5]}...")
-    user = await require_user_by_email(email, db, logger)
-
-    comment_result = await db.execute(select(Comment).filter_by(id=comment_id))
-    comment = comment_result.scalar_one_or_none()
-    if not comment:
-        raise HTTPException(status_code=404, detail="Comment not found")
-
-    reaction_result = await db.execute(
-        select(CommentReaction).filter_by(
-            comment_id=comment_id, user_id=user.id, reaction_type=ReactionType.LIKE
-        )
-    )
-    reaction = reaction_result.scalar_one_or_none()
-    if not reaction:
-        raise HTTPException(status_code=400, detail="Comment not liked")
-
-    async def operation() -> dict:
-        await db.delete(reaction)
-        comment.comment_likes -= 1
-        await db.flush()
-        await db.refresh(comment)
-
-        comment.comment_likes = max(0, comment.comment_likes)
-        comment.comment_dislikes = max(0, comment.comment_dislikes)
-
-        return {"detail": "Comment unliked successfully"}
-
-    return await execute_db_operation(
-        db,
-        operation,
-        f"Successfully unliked comment {comment_id} for user {user.id}",
-        f"Error unliking comment {comment_id}",
-        logger,
-        refresh_object=comment,
-        use_flush=True,
-    )
-
-
-async def undislike_comment(email: str, comment_id: int, db: AsyncSession) -> dict:
-    """Remove dislike from a comment and update counters."""
-    logger.info(f"Undisliking comment {comment_id} for user email: {email[:5]}...")
-    user = await require_user_by_email(email, db, logger)
-
-    comment_result = await db.execute(select(Comment).filter_by(id=comment_id))
-    comment = comment_result.scalar_one_or_none()
-    if not comment:
-        raise HTTPException(status_code=404, detail="Comment not found")
-
-    reaction_result = await db.execute(
-        select(CommentReaction).filter_by(
-            comment_id=comment_id, user_id=user.id, reaction_type=ReactionType.DISLIKE
-        )
-    )
-    reaction = reaction_result.scalar_one_or_none()
-    if not reaction:
-        raise HTTPException(status_code=400, detail="Comment not disliked")
-
-    async def operation() -> dict:
-        await db.delete(reaction)
-        comment.comment_dislikes -= 1
-        await db.flush()
-        await db.refresh(comment)
-
-        comment.comment_likes = max(0, comment.comment_likes)
-        comment.comment_dislikes = max(0, comment.comment_dislikes)
-
-        return {"detail": "Comment undisliked successfully"}
-
-    return await execute_db_operation(
-        db,
-        operation,
-        f"Successfully undisliked comment {comment_id} for user {user.id}",
-        f"Error undisliking comment {comment_id}",
         logger,
         refresh_object=comment,
         use_flush=True,

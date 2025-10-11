@@ -1,5 +1,5 @@
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_serializer
 
 
 class Base(BaseModel):
@@ -14,6 +14,10 @@ class UserData(Base):
     age: int
     username: str
     profile_pic: str | None
+
+    @field_serializer('created_at')
+    def serialize_created_at(self, dt: datetime) -> str:
+        return dt.isoformat()
 
 
 class FriendshipData(Base):

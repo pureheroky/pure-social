@@ -1,11 +1,12 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
 from middlewares.bearer_middleware import BearerCheckMiddleware
-from utils import error_handlers
+from utils import error_handlers, cors
 from .routers import post as post_router
 
 app = FastAPI(title="Posts api", version="v1")
 app.add_middleware(BearerCheckMiddleware)
+cors.setup_cors(app)
 
 app.add_exception_handler(HTTPException, error_handlers.http_exception_handler)
 app.add_exception_handler(
