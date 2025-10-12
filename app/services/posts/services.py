@@ -39,7 +39,7 @@ async def get_posts(
         .filter_by(author_id=user.id)
         .options(
             selectinload(Post.comments).selectinload(Comment.user),
-            selectinload(Post.reactions) 
+            selectinload(Post.reactions),
         )
         .limit(limit)
         .offset(offset)
@@ -57,10 +57,11 @@ async def get_posts(
         pd = PostData.model_validate(post)
         pd.user_reaction = next(
             (r.reaction_type.value for r in post.reactions if r.user_id == user.id),
-            None
+            None,
         )
         post_datas.append(pd)
     return post_datas
+
 
 async def create_post(
     email: str,
@@ -191,6 +192,7 @@ async def edit_post(
         use_flush=True,
     )
 
+
 async def get_reacted_posts(email: str, db: AsyncSession) -> List[PostData]:
     """Retrieve posts that the user has reacted to, deduplicated."""
     logger.info(f"Retrieving reacted posts for user email: {email[:5]}...")
@@ -203,7 +205,7 @@ async def get_reacted_posts(email: str, db: AsyncSession) -> List[PostData]:
         .filter(PostReaction.user_id == user.id)
         .options(
             selectinload(Post.comments).selectinload(Comment.user),
-            selectinload(Post.reactions)  
+            selectinload(Post.reactions),
         )
         .order_by(Post.created_at.desc())
     )
@@ -219,7 +221,7 @@ async def get_reacted_posts(email: str, db: AsyncSession) -> List[PostData]:
         pd = PostData.model_validate(post)
         pd.user_reaction = next(
             (r.reaction_type.value for r in post.reactions if r.user_id == user.id),
-            None
+            None,
         )
         post_datas.append(pd)
     return post_datas
@@ -347,11 +349,13 @@ async def dislike_post(email: str, post_id: int, db: AsyncSession) -> dict:
         use_flush=True,
     )
 
+
 async def get_comments(
-    post_id: int, db: AsyncSession, limit: int = 50, offset: int = 0
+    email: str, post_id: int, db: AsyncSession, limit: int = 50, offset: int = 0
 ) -> List[PostCommentData]:
     """Retrieve all comments for a post with reactions and pagination."""
     logger.info(f"Retrieving comments for post {post_id}...")
+    user = await require_user_by_email(email, db, logger)
     post_result = await db.execute(select(Post).filter_by(id=post_id))
     post = post_result.scalar_one_or_none()
     if not post:
@@ -369,7 +373,16 @@ async def get_comments(
     )
     result = await db.execute(query)
     comments = result.scalars().all()
-    return [PostCommentData.model_validate(comment) for comment in comments]
+    comment_datas = []
+    for comment in comments:
+        cd = PostCommentData.model_validate(comment)
+        cd.user_reaction = next(
+            (r.reaction_type.value for r in comment.reactions if r.user_id == user.id),
+            None,
+        )
+        comment_datas.append(cd)
+    return comment_datas
+
 
 async def add_comment(
     post_id: int, comment_text: str, email: str, db: AsyncSession

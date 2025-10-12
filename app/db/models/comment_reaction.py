@@ -1,8 +1,7 @@
 from __future__ import annotations
 from sqlalchemy import Integer, TIMESTAMP, ForeignKey, Enum, UniqueConstraint
 from typing import TYPE_CHECKING
-from sqlalchemy.orm import Mapped, mapped_column, relationship, object_session
-from sqlalchemy import event
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime, timezone
 from .post_reaction import ReactionType
 

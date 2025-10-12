@@ -1,11 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Cookie
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from db.session import get_db
 from ..schemas import (
     UserAuthLogin,
     UserAuthRegister,
-    UserUpdateRefresh,
 )
 from ..services import (
     login_user,
@@ -14,6 +13,7 @@ from ..services import (
     verify_token,
     set_auth_cookies,
     set_logout_cookies,
+    logout_user,
 )
 from services.users.schemas import UserData
 
@@ -42,14 +42,19 @@ async def user_register(data: UserAuthRegister, db: AsyncSession = Depends(get_d
     return response
 
 @router.post("/token/refresh", response_model=UserData)
-async def refresh_token(data: UserUpdateRefresh, db: AsyncSession = Depends(get_db)):
-    """Refresh user tokens."""
-    access_token, refresh_token, user = await refresh_tokens(data.refresh_token, db)
+async def refresh_token_endpoint(
+    refresh_token: str | None = Cookie(None),
+    db: AsyncSession = Depends(get_db)
+):
+    """Refresh user tokens using refresh token from cookie."""
+    if not refresh_token:
+        raise HTTPException(status_code=401, detail="No refresh token provided")
+    access_token, refresh_token_new, user = await refresh_tokens(refresh_token, db)
     response = JSONResponse(
         content=user.model_dump(),
         status_code=200
     )
-    set_auth_cookies(response, access_token, refresh_token)
+    set_auth_cookies(response, access_token, refresh_token_new)
     return response
 
 @router.get("/verify", response_model=UserData)
@@ -62,8 +67,8 @@ async def verify_user(request: Request, db: AsyncSession = Depends(get_db)):
     return user.model_dump()
 
 @router.post("/logout")
-async def user_logout(db: AsyncSession = Depends(get_db)):
-    """Clear HttpOnly cookies."""
-    response = JSONResponse(content={"message": "Logged out"}, status_code=200)
+async def user_logout(request: Request, db: AsyncSession = Depends(get_db)):
+    """Clear HttpOnly cookies and DB refresh token."""
+    response = JSONResponse(content=await logout_user(request, db), status_code=200)
     set_logout_cookies(response)
     return response

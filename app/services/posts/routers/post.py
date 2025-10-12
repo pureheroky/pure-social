@@ -5,9 +5,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from db.session import get_db
 
 from ..schemas import (
-    PostData, PostCommentData,
-    LikePostRequest, DislikePostRequest,
-    AddCommentRequest, LikeCommentRequest, DislikeCommentRequest,
+    PostData,
+    PostCommentData,
+    LikePostRequest,
+    DislikePostRequest,
+    AddCommentRequest,
+    LikeCommentRequest,
+    DislikeCommentRequest,
     DeleteCommentRequest,
 )
 from ..services import (
@@ -48,13 +52,15 @@ async def create_user_post(
 ):
     return await create_post(request.state.user_email, post_text, db, post_image)
 
+
 @router.delete("/delete_post")
 async def delete_user_post(
-    request: Request, 
-    post_id: int = Query(..., ge=1),  
-    db: AsyncSession = Depends(get_db)
+    request: Request,
+    post_id: int = Query(..., ge=1),
+    db: AsyncSession = Depends(get_db),
 ):
     return await delete_post(request.state.user_email, post_id, db)
+
 
 @router.patch("/edit_post", response_model=PostData)
 async def edit_user_post(
@@ -68,6 +74,7 @@ async def edit_user_post(
     return await edit_post(
         request.state.user_email, post_text, post_id, remove_image, db, post_image
     )
+
 
 @router.post("/like_post")
 async def like_user_post(
@@ -100,13 +107,14 @@ async def get_user_reacted_posts(
 
 @router.get("/comments", response_model=List[PostCommentData])
 async def get_post_comments(
+    request: Request,
     post_id: int,
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
     """Get comments for a post with pagination."""
-    return await get_comments(post_id, db, limit, offset)
+    return await get_comments(request.state.user_email, post_id, db, limit, offset)
 
 
 @router.post("/add_comment", response_model=PostCommentData, status_code=201)
@@ -116,17 +124,24 @@ async def add_post_comment(
     db: AsyncSession = Depends(get_db),
 ):
     """Add a comment to a post."""
-    return await add_comment(comment_request.post_id, comment_request.comment_text, request.state.user_email, db)
+    return await add_comment(
+        comment_request.post_id,
+        comment_request.comment_text,
+        request.state.user_email,
+        db,
+    )
 
 
 @router.delete("/delete_comment")
 async def delete_comment_endpoint(
-    request: Request, 
+    request: Request,
     comment_request: DeleteCommentRequest = Body(...),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     """Delete a comment."""
-    return await delete_comment(request.state.user_email, comment_request.comment_id, db)
+    return await delete_comment(
+        request.state.user_email, comment_request.comment_id, db
+    )
 
 
 @router.post("/like_comment")
@@ -146,4 +161,6 @@ async def dislike_comment_endpoint(
     db: AsyncSession = Depends(get_db),
 ):
     """Dislike a comment."""
-    return await dislike_comment(request.state.user_email, comment_request.comment_id, db)
+    return await dislike_comment(
+        request.state.user_email, comment_request.comment_id, db
+    )

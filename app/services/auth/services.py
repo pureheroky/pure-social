@@ -1,4 +1,4 @@
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -190,8 +190,24 @@ async def refresh_tokens(refresh_token: str, db: AsyncSession) -> tuple[str, str
         use_flush=True,
     )
 
-async def logout_user(db: AsyncSession) -> dict:
+async def logout_user(request: Request, db: AsyncSession) -> dict:
     """Clear tokens in DB and return logout response."""
+    user_email = getattr(request.state, "user_email", None)
+    if user_email:
+        result = await db.execute(select(User).filter_by(email=user_email))
+        user = result.scalar_one_or_none()
+        if user:
+            user.refresh_token = None
+            async def operation():
+                await db.flush()
+            await execute_db_operation(
+                db,
+                operation,
+                f"Successfully cleared refresh token for {user_email}",
+                "Error clearing refresh token",
+                logger,
+                use_flush=True,
+            )
     return {"message": "Logged out"}
 
 async def verify_token(user_email: str, db: AsyncSession) -> UserData:

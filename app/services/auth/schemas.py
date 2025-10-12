@@ -19,10 +19,6 @@ class UserAuthLogin(Base):
     password: str
 
 
-class UserUpdateRefresh(Base):
-    refresh_token: str
-
-
 class UserAuthRegister(Base):
     name: str
     username: str
