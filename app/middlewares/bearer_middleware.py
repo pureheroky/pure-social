@@ -21,6 +21,9 @@ class BearerCheckMiddleware(BaseHTTPMiddleware):
             "/v1/auth/login",
             "/v1/auth/register",
             "/v1/auth/token/refresh",
+            "/v1/auth/health",
+            "/v1/post/health",
+            "/v1/user/health",
         ]
 
         if request.url.path in public_paths:

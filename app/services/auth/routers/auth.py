@@ -19,6 +19,11 @@ from services.users.schemas import UserData
 
 router = APIRouter()
 
+@router.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {"status":"ok"}
+
 @router.post("/login", response_model=UserData)
 async def user_login(data: UserAuthLogin, db: AsyncSession = Depends(get_db)):
     """Authenticate user and set HttpOnly cookies."""

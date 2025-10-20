@@ -19,6 +19,10 @@ from ..services import (
 
 router = APIRouter()
 
+@router.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {"status":"ok"}
 
 @router.get("/me", response_model=UserData)
 async def get_me(request: Request, db: AsyncSession = Depends(get_db)):

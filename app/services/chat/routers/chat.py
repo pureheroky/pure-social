@@ -34,6 +34,10 @@ logger = setup_log("chat", __name__)
 manager = ConnectionManager()
 router = APIRouter(prefix="/chat", tags=["chat"])
 
+@router.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {"status":"ok"}
 
 @router.get("/list", response_model=ChatListResponse)
 async def list_chats(

@@ -31,6 +31,10 @@ from ..services import (
 
 router = APIRouter()
 
+@router.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {"status":"ok"}
 
 @router.get("/my_posts", response_model=List[PostData])
 async def get_user_posts(
