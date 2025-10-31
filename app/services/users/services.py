@@ -7,7 +7,6 @@ from sqlalchemy import or_, select, and_
 from sqlalchemy.orm import selectinload
 from .schemas import UserData, FriendshipData
 from db.models.friendship import Friendship, FriendshipStatus
-from db.models.user import User
 from utils.db_utils import (
     execute_db_operation,
     require_user_by_email,
@@ -46,8 +45,14 @@ async def upload_avatar_pic(email: str, file: UploadFile, db: AsyncSession) -> U
     if user.profile_pic:
         parsed_url = urlparse(user.profile_pic)
         old_blob_name = parsed_url.path.lstrip("/")
+
+        bucket_prefix = f"{gcs_client.bucket_name()}/"
+        if old_blob_name.startswith(bucket_prefix):
+            old_blob_name = old_blob_name[len(bucket_prefix):]
+
         if "?" in old_blob_name:
             old_blob_name = old_blob_name.split("?")[0]
+
         gcs_client.delete_file(old_blob_name)
 
     avatar_url = await validate_and_upload_image(

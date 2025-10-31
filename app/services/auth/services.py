@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timezone
+from utils.helpers import clear_auth_cookies, set_auth_cookies
 from services.users.schemas import UserData
 from utils.db_utils import execute_db_operation
 from db.models.user import User
@@ -16,7 +17,6 @@ from core.security import (
 )
 from utils.logger import setup_log
 from core.config import get_settings
-import os
 
 logger = setup_log("auth", __name__)
 settings = get_settings()
@@ -27,50 +27,6 @@ def _setup_tokens(email: str, user: User) -> tuple[str, str]:
     refresh = generate_refresh_token(email)
     user.refresh_token = refresh
     return access, refresh
-
-def set_auth_cookies(response: JSONResponse, access_token: str, refresh_token: str):
-    """Set HttpOnly cookies for access and refresh tokens on the response."""
-    is_secure = os.getenv("ENV") == "production"
-    response.set_cookie(
-        key="access_token",
-        value=access_token,
-        httponly=True,
-        secure=is_secure,
-        samesite="strict",
-        max_age=settings.ACCESS_TOKEN_TTL,
-        path="/",
-    )
-    response.set_cookie(
-        key="refresh_token",
-        value=refresh_token,
-        httponly=True,
-        secure=is_secure,
-        samesite="strict",
-        max_age=settings.REFRESH_TOKEN_TTL,
-        path="/",
-    )
-
-def set_logout_cookies(response: JSONResponse):
-    """Set expired cookies to clear access and refresh tokens."""
-    is_secure = os.getenv("ENV") == "production"
-    response.set_cookie(
-        key="access_token",
-        value="",
-        httponly=True,
-        secure=is_secure,
-        samesite="strict",
-        expires="Thu, 01 Jan 1970 00:00:00 GMT",
-        path="/",
-    )
-    response.set_cookie(
-        key="refresh_token",
-        value="",
-        httponly=True,
-        secure=is_secure,
-        samesite="strict",
-        expires="Thu, 01 Jan 1970 00:00:00 GMT",
-        path="/",
-    )
 
 async def login_user(data: UserAuthLogin, db: AsyncSession) -> tuple[str, str, UserData]:
     """Authenticate user login and generate tokens."""
@@ -90,7 +46,7 @@ async def login_user(data: UserAuthLogin, db: AsyncSession) -> tuple[str, str, U
         access, refresh = _setup_tokens(data.email, user)
         return access, refresh, UserData.model_validate(user)
 
-    return await execute_db_operation(
+    access, refresh, user_dto = await execute_db_operation(
         db,
         operation,
         f"Successfully logged in user {data.email}",
@@ -98,6 +54,10 @@ async def login_user(data: UserAuthLogin, db: AsyncSession) -> tuple[str, str, U
         logger,
         use_flush=True,
     )
+
+    resp = JSONResponse({"user": user_dto.model_dump()})
+    set_auth_cookies(resp, access, refresh)
+    return resp
 
 async def register_user(
     data: UserAuthRegister, db: AsyncSession
@@ -138,7 +98,7 @@ async def register_user(
         access, refresh = _setup_tokens(data.email, new_user)
         return access, refresh, UserData.model_validate(new_user)
 
-    return await execute_db_operation(
+    access, refresh, user_dto = await execute_db_operation(
         db,
         operation,
         f"Successfully registered new user {data.email} (id={new_user.id})",
@@ -148,40 +108,44 @@ async def register_user(
         use_flush=True,
     )
 
-async def refresh_tokens(refresh_token: str, db: AsyncSession) -> tuple[str, str, UserData]:
-    """Refresh access and refresh tokens using valid refresh token."""
-    logger.info(f"Refreshing tokens for token: {refresh_token[:10]}...")
+    resp = JSONResponse({"user": user_dto.model_dump()})
+    set_auth_cookies(resp, access, refresh)
+    return resp
+
+async def refresh_tokens(request: Request, db: AsyncSession) -> tuple[str, str, UserData]:
+    """Refresh access and refresh tokens using valid refresh token from httpOnly cookie."""
+    cookie_refresh = request.cookies.get("refresh_token")
+    if not cookie_refresh:
+        logger.error("No refresh token cookie")
+        raise HTTPException(status_code=401, detail="No refresh token")
+
+    logger.info(f"Refreshing tokens for cookie: {cookie_refresh[:10]}...")
     try:
-        payload = decode_token(refresh_token)
+        payload = decode_token(cookie_refresh)
         user_email = payload["sub"]
     except Exception:
-        logger.error(f"Invalid refresh token: {refresh_token[:10]}...")
+        logger.error("Invalid refresh token (decode failed)")
         raise HTTPException(status_code=401, detail="Provided token is not correct")
 
     result = await db.execute(select(User).filter_by(email=user_email))
     user = result.scalar_one_or_none()
-
     if not user:
         logger.error(f"User not found for email: {user_email[:5]}...")
-        raise HTTPException(
-            status_code=401, detail="User with that email does not exist"
-        )
+        raise HTTPException(status_code=401, detail="User with that email does not exist")
 
     if not user.refresh_token:
-        logger.error(f"No refresh token stored for user: {user_email[:5]}...")
+        logger.error(f"No stored refresh token for user: {user_email[:5]}...")
         raise HTTPException(status_code=401, detail="Refresh token does not exist")
 
-    if refresh_token != user.refresh_token:
+    if cookie_refresh != user.refresh_token:
         logger.error(f"Token mismatch for user: {user_email[:5]}...")
-        raise HTTPException(
-            status_code=401, detail="Provided token does not match stored token"
-        )
+        raise HTTPException(status_code=401, detail="Provided token does not match stored token")
 
     async def operation() -> tuple[str, str, UserData]:
         access, refresh = _setup_tokens(user_email, user)
         return access, refresh, UserData.model_validate(user)
 
-    return await execute_db_operation(
+    access, refresh, user_dto = await execute_db_operation(
         db,
         operation,
         f"Tokens successfully refreshed for {user_email}",
@@ -190,16 +154,26 @@ async def refresh_tokens(refresh_token: str, db: AsyncSession) -> tuple[str, str
         use_flush=True,
     )
 
-async def logout_user(request: Request, db: AsyncSession) -> dict:
-    """Clear tokens in DB and return logout response."""
+    resp = JSONResponse({"user": user_dto.model_dump()})
+    set_auth_cookies(resp, access, refresh)
+    return resp
+
+async def logout_user(request: Request, db: AsyncSession) -> JSONResponse:
+    """
+    Логаут:
+    - Если в request.state.user_email есть email — чистим refresh в БД.
+    - В любом случае возвращаем ответ и ЧИСТИМ куки через delete_cookie.
+    """
     user_email = getattr(request.state, "user_email", None)
     if user_email:
         result = await db.execute(select(User).filter_by(email=user_email))
         user = result.scalar_one_or_none()
         if user:
             user.refresh_token = None
-            async def operation():
+
+            async def operation() -> None:
                 await db.flush()
+
             await execute_db_operation(
                 db,
                 operation,
@@ -208,7 +182,10 @@ async def logout_user(request: Request, db: AsyncSession) -> dict:
                 logger,
                 use_flush=True,
             )
-    return {"message": "Logged out"}
+
+    resp = JSONResponse({"message": "Logged out"})
+    clear_auth_cookies(resp)
+    return resp
 
 async def verify_token(user_email: str, db: AsyncSession) -> UserData:
     """Verify token and return user data."""
@@ -218,7 +195,6 @@ async def verify_token(user_email: str, db: AsyncSession) -> UserData:
 
     result = await db.execute(select(User).filter_by(email=user_email))
     user = result.scalar_one_or_none()
-
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
 

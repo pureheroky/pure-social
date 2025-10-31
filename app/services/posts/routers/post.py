@@ -20,6 +20,8 @@ from ..services import (
     dislike_post,
     edit_post,
     get_posts,
+    get_friends_posts,
+    get_feed_posts,
     get_comments,
     add_comment,
     delete_comment,
@@ -45,6 +47,26 @@ async def get_user_posts(
 ):
     """Get user's posts with pagination."""
     return await get_posts(request.state.user_email, db, limit, offset)
+
+@router.get("/friend_posts", response_model=List[PostData])
+async def friends_posts(
+    request: Request,
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get user's friends posts with pagination"""
+    return await get_friends_posts(request.state.user_email, db, limit, offset)
+
+@router.get("/feed", response_model=List[PostData])
+async def feed(
+    request: Request,
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+):
+    """User's posts + friends' posts, sorted by created_at desc."""
+    return await get_feed_posts(request.state.user_email, db, limit, offset)
 
 
 @router.post("/create_post", response_model=PostData, status_code=201)

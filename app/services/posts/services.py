@@ -3,8 +3,9 @@ from typing import List, Optional
 from urllib.parse import urlparse
 from fastapi import HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete, update
+from sqlalchemy import or_, select, delete, update
 from sqlalchemy.orm import selectinload
+from db.models.friendship import Friendship, FriendshipStatus
 from db.models.post import Post
 from db.models.comment import Comment
 from db.models.comment_reaction import CommentReaction
@@ -26,6 +27,22 @@ settings = get_settings()
 gcs_client = GCSManager(settings.GCS_BUCKET_NAME)
 ALLOWED_EXTENSIONS = {".jpg", ".png", ".webp", ".jpeg"}
 
+def _friend_ids_subq(user_id: int):
+    q1 = (
+        select(Friendship.friend_id.label("uid"))
+        .where(
+            Friendship.user_id == user_id,
+            Friendship.status == FriendshipStatus.ACCEPTED,
+        )
+    )
+    q2 = (
+        select(Friendship.user_id.label("uid"))
+        .where(
+            Friendship.friend_id == user_id,
+            Friendship.status == FriendshipStatus.ACCEPTED,
+        )
+    )
+    return q1.union(q2).subquery()
 
 async def get_posts(
     email: str, db: AsyncSession, limit: int = 50, offset: int = 0
@@ -38,6 +55,7 @@ async def get_posts(
         select(Post)
         .filter_by(author_id=user.id)
         .options(
+            selectinload(Post.user),
             selectinload(Post.comments).selectinload(Comment.user),
             selectinload(Post.reactions),
         )
@@ -62,6 +80,85 @@ async def get_posts(
         post_datas.append(pd)
     return post_datas
 
+async def get_friends_posts(
+    email: str, db: AsyncSession, limit: int = 50, offset: int = 0
+) -> List[PostData]:
+    """Retrieve all posts of user's accepted friends with pagination."""
+    logger.info(f"Trying to get posts of friends for user email: {email[:5]}...")
+    user = await require_user_by_email(email, db, logger)
+
+    friend_ids_sq = _friend_ids_subq(user.id)
+
+    query = (
+        select(Post)
+        .where(Post.author_id.in_(select(friend_ids_sq.c.uid)))
+        .options(
+            selectinload(Post.user),
+            selectinload(Post.comments).selectinload(Comment.user),
+            selectinload(Post.reactions),
+        )
+        .order_by(Post.created_at.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+
+    result = await db.execute(query)
+    posts = result.scalars().all()
+
+    post_datas: List[PostData] = []
+    for post in posts:
+        pd = PostData.model_validate(post)
+        pd.user_reaction = next(
+            (r.reaction_type.value for r in post.reactions if r.user_id == user.id),
+            None,
+        )
+        post_datas.append(pd)
+
+    return post_datas
+
+async def get_feed_posts(
+    email: str, db: AsyncSession, limit: int = 50, offset: int = 0
+) -> List[PostData]:
+    """
+    Retrieve a feed: user's own posts + accepted friends' posts
+    ordered by created_at DESC with pagination.
+    """
+    logger.info(f"Trying to get feed for user email: {email[:5]}...")
+    user = await require_user_by_email(email, db, logger)
+
+    friend_ids_sq = _friend_ids_subq(user.id)
+
+    query = (
+        select(Post)
+        .where(
+            or_(
+                Post.author_id == user.id,
+                Post.author_id.in_(select(friend_ids_sq.c.uid)),
+            )
+        )
+        .options(
+            selectinload(Post.user),
+            selectinload(Post.comments).selectinload(Comment.user),
+            selectinload(Post.reactions),
+        )
+        .order_by(Post.created_at.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+
+    result = await db.execute(query)
+    posts = result.scalars().all()
+
+    post_datas: List[PostData] = []
+    for post in posts:
+        pd = PostData.model_validate(post)
+        pd.user_reaction = next(
+            (r.reaction_type.value for r in post.reactions if r.user_id == user.id),
+            None,
+        )
+        post_datas.append(pd)
+
+    return post_datas
 
 async def create_post(
     email: str,

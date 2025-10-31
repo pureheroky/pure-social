@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from datetime import datetime
 from typing import List, Optional
 
@@ -55,7 +55,8 @@ class PostData(Base):
     post_likes: int
     post_dislikes: int
     post_image: str | None
-    comments: List[PostCommentData] = []
+    user: UserData
+    comments: List["PostCommentData"] = Field(default_factory=list)
     user_reaction: Optional[str] = None 
 
 
